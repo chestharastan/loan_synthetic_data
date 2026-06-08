@@ -1,0 +1,342 @@
+%==============================================================================
+% Synthetic Loan Data Generation and Risk/Approval Modelling
+% IEEE-style research paper. Compile with:  pdflatex main.tex  (run twice)
+%==============================================================================
+\documentclass[conference]{IEEEtran}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{array}
+\usepackage{url}
+\usepackage{xcolor}
+\usepackage[hidelinks]{hyperref}
+
+% A compact code/verbatim block for the listings we show.
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  framesep=4pt,
+  aboveskip=6pt,
+  belowskip=6pt,
+}
+
+\begin{document}
+
+\title{Synthetic Loan-Application Data Generation and \\
+Machine-Learning Models for Credit-Risk Grading \\
+and Approval Decisions}
+
+\author{
+\IEEEauthorblockN{Author Name}
+\IEEEauthorblockA{Loan Risk \& Approval Project\\
+Synthetic Data and Modelling Pipeline\\
+\today}
+}
+
+\maketitle
+
+%------------------------------------------------------------------------------
+\begin{abstract}
+Real consumer-lending data is restricted by privacy law and commercial
+confidentiality, which makes it difficult to build and openly demonstrate
+credit models. This paper presents a fully reproducible pipeline that
+\emph{generates realistic synthetic loan-application data} and trains
+machine-learning models on it to predict two outcomes: an applicant's
+\emph{credit-risk grade} and the lender's \emph{approval decision}. The work
+progresses through two iterations: Version~1, a broad United-States--style
+dataset with 33 features, and Version~2, a focused dataset grounded in the
+Cambodian micro-lending market with 15 features. Both attach
+transparent, rule-based labels so that the ground truth is auditable rather
+than a black box. On a held-out test set, the risk model attains approximately
+91\% accuracy and the approval model approximately 78\%; we show that the gap is
+a \emph{deliberate} consequence of injecting realistic stochasticity into the
+approval rule, not a modelling deficiency. The deliverable is a config-driven
+codebase that cleanly separates data generation from model training and exports
+serveable pipelines.
+\end{abstract}
+
+\begin{IEEEkeywords}
+synthetic data, credit risk, loan approval, machine learning, random forest,
+reproducibility, micro-finance.
+\end{IEEEkeywords}
+
+%------------------------------------------------------------------------------
+\section{Introduction}
+
+Lenders must decide (a)~how risky a borrower is and (b)~whether to approve a
+requested loan. Building machine-learning models for these tasks normally
+requires historical loan books, which are private. Without data, one cannot
+prototype, teach, or interview around the problem. The central question of this
+work is therefore: \emph{can we synthesise data that is realistic enough to
+support meaningful credit modelling, while keeping the labelling logic fully
+transparent?}
+
+\subsection{Objectives}
+\begin{enumerate}
+  \item Generate a synthetic loan-application dataset that encodes plausible
+        socio-economic correlations (income, region, employment, loan
+        products).
+  \item Attach rule-based labels for a \emph{risk grade} and an \emph{approval
+        status}.
+  \item Train and evaluate models that recover those labels.
+  \item Make the pipeline reproducible and production-shaped, exporting saved
+        pipelines that can be served from an application.
+\end{enumerate}
+
+\subsection{Contributions}
+\begin{itemize}
+  \item A documented, seed-reproducible synthetic data generator for the
+        Cambodian lending context.
+  \item A transparent points-based risk scorecard and a probabilistic approval
+        rule that together define the learning targets.
+  \item Two trained \texttt{scikit-learn} pipelines and an evaluation harness.
+  \item A software design that decouples data generation from training, the two
+        communicating only through a documented CSV schema.
+\end{itemize}
+
+%------------------------------------------------------------------------------
+\section{Background and Motivation}
+
+\subsection{Why synthetic data}
+Synthetic data sidesteps privacy and licensing constraints and lets us
+\emph{control} the data-generating process. The trade-off is that a model
+trained on it only learns the assumptions baked into the generator. We mitigate
+this by keeping those assumptions explicit and inspectable in source code rather
+than hidden.
+
+\subsection{Why the Cambodian context}
+Version~1 used generic United-States--style ranges. Version~2 was re-grounded in
+the Cambodian micro-finance market because this makes the synthetic ranges
+concrete and defensible: USD-denominated loans, province-level geography,
+product types common to Cambodian micro-finance institutions (moto, agriculture,
+small-and-medium-enterprise loans), and the high nominal interest rates typical
+of the sector (e.g.\ 24--36\% on moto loans). The dataset then reflects a real
+domain rather than abstract noise.
+
+%------------------------------------------------------------------------------
+\section{The Two Versions}
+
+The project evolved through two iterations, both preserved as reference
+notebooks. Table~\ref{tab:versions} summarises the differences.
+
+\begin{table}[t]
+\caption{Comparison of the two project versions.}
+\label{tab:versions}
+\centering
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{p{1.5cm}p{2.6cm}p{2.6cm}}
+\toprule
+\textbf{Aspect} & \textbf{Version 1 (legacy)} & \textbf{Version 2 (productionised)} \\
+\midrule
+Market   & US-style, generic & Cambodian micro-lending \\
+Features & 33 & 15 \\
+Targets  & Approval (class.), Risk score (regression) & Risk category (3-class), Loan status (binary) \\
+Risk label & Weighted sub-scores & Points scorecard $\to$ 3 bands \\
+Approval & Deterministic threshold & Probabilistic, by risk band \\
+Models   & Logistic Reg., RF, Gradient Boosting & Random Forest pipelines \\
+Saved?   & No (notebook only) & Yes (\texttt{joblib} + metrics) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Version 1: broad feature exploration}
+Version~1 generated 40{,}000 records with 33 features spanning demographics
+(age, education, marital status, dependents), credit behaviour (credit score,
+utilisation, inquiries, payment history, bankruptcies), and balance-sheet items
+(assets, liabilities, net worth, savings). It derived an interest rate from
+credit score, amount and term, computed a total debt-to-income ratio, then
+applied a deterministic weighted-sum approval rule and a second weighted
+aggregation bucketed into Low/Medium/High risk. It trained Logistic Regression,
+Random Forest and Gradient Boosting models, reaching about 91\% approval
+accuracy and $R^2 \approx 0.76$ on the risk-score regression. Its weakness was
+complexity: 33 features, several weakly motivated, and no model persistence.
+
+\subsection{Version 2: focused, grounded, productionised}
+Version~2 reduced the feature set to the 15 most decision-relevant variables and
+re-grounded them in Cambodia. It introduced the points-based scorecard for risk
+and a probabilistic approval rule, trained one Random Forest pipeline per
+target, and saved the pipelines for serving. This is the version rebuilt into
+the production package; Version~1 remains a reference.
+
+%------------------------------------------------------------------------------
+\section{Methodology}
+
+\subsection{Data-generating process}
+Each application is constructed in a fixed \emph{causal order}, so downstream
+variables depend on upstream ones, producing realistic correlations rather than
+independent noise:
+\begin{lstlisting}
+Province -> RegionType -> EmploymentType -> Income
+                              | Age _____/
+                              v
+LoanType -> LoanAmount -> Term, Rate -> DTI
+                              v
+RiskScore -> RiskCategory -> LoanStatus
+\end{lstlisting}
+
+The principal conditional rules are: region drives the employment mix (rural
+areas skew toward farming, urban toward salaried work); income depends on
+region, employment and age (prime age 25--45 receives a higher ceiling); the
+loan product depends on the applicant segment; the loan amount is capped at five
+times annual income; and term and interest rate are product-specific. The
+debt-to-income ratio (DTI) uses the standard amortising-annuity payment
+\begin{equation}
+A = P \cdot \frac{r(1+r)^{n}}{(1+r)^{n}-1},
+\end{equation}
+where $P$ is the principal, $r$ the periodic interest rate and $n$ the number of
+periods; $\text{DTI} = A / \text{income}$.
+
+\subsection{Labelling}
+\textbf{Risk} is a transparent scorecard in $[0,100]$. Each factor contributes
+risk points and mitigating conditions subtract them; the maxima are given in
+Table~\ref{tab:scorecard}. The score is bucketed into Low ($\le 35$),
+Medium ($36$--$65$) and High ($>65$).
+
+\begin{table}[t]
+\caption{Risk scorecard factor weights.}
+\label{tab:scorecard}
+\centering
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{lc}
+\toprule
+\textbf{Factor} & \textbf{Max points} \\
+\midrule
+Employment type        & 25 \\
+Loan-to-income ratio    & 20 \\
+Loan purpose            & 15 \\
+Debt-to-income (DTI)    & 15 \\
+Credit history          & 12 \\
+Region                  & 10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Approval} is intentionally \emph{probabilistic}: a base probability set
+by risk band (Low 85\%, Medium 45\%, High 15\%) is adjusted by collateral,
+credit history, employment and product, after which a Bernoulli draw decides the
+outcome. This injects irreducible noise so the task is non-trivial.
+
+\subsection{Modelling}
+Both targets are learned by independent Random Forest classifiers wrapped in a
+\texttt{scikit-learn} pipeline:
+\begin{lstlisting}
+ColumnTransformer(
+  StandardScaler(numeric) +
+  OneHotEncoder(categorical))
+-> RandomForestClassifier(
+   n_estimators=200, max_depth=12,
+   class_weight="balanced")
+\end{lstlisting}
+Bundling preprocessing inside the pipeline guarantees train/serve consistency:
+the saved artifact consumes raw application records directly, with no separate
+feature-engineering step that could drift.
+
+\subsection{Experimental setup and leakage control}
+We generate 40{,}000 applications and use an 80/20 stratified train/test split
+with a fixed seed. We report accuracy, macro and weighted $F_1$, the confusion
+matrix, and a per-class report. Crucially, the raw \texttt{RiskScore} (the
+intermediate that defines the risk band) and the \texttt{RiskCategory} label are
+\emph{excluded} from the feature set; both models consume the same 15 raw
+features, so the saved pipelines never observe leakage columns.
+
+%------------------------------------------------------------------------------
+\section{Results}
+
+On the held-out test set of 8{,}000 applications, the models achieve the scores
+in Table~\ref{tab:results}. A representative risk confusion matrix (rows are
+true classes, columns predicted, order Low/Medium/High) is
+\[
+\begin{bmatrix}
+4061 & 278 & 0 \\
+171 & 2624 & 192 \\
+0 & 56 & 618
+\end{bmatrix}.
+\]
+
+\begin{table}[t]
+\caption{Held-out test-set performance.}
+\label{tab:results}
+\centering
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Model} & \textbf{Accuracy} & \textbf{Macro $F_1$} \\
+\midrule
+Risk (Low/Medium/High)     & $\approx 0.91$ & $\approx 0.89$ \\
+Approval (Approved/Reject) & $\approx 0.78$ & $\approx 0.76$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Interpretation.} The risk model is highly accurate because its label is
+a deterministic function of the features; a tree ensemble recovers a scorecard
+well, and its errors concentrate on \emph{adjacent} bands rather than skipping a
+band. The approval model plateaus near 0.78 \emph{by design}: the approval label
+contains a Bernoulli coin-flip, so part of the outcome is irreducible. A model
+scoring near 0.99 here would instead signal label leakage or a broken
+deterministic rule.
+
+%------------------------------------------------------------------------------
+\section{Discussion}
+
+The project demonstrates a complete, reproducible workflow from data synthesis
+to a serveable model, with a disciplined separation between the generation and
+training packages, which share only a documented CSV contract. Evaluation is
+honest: the approval ceiling is explained rather than hidden. Engineering choices
+that support this include a single configuration file (sample size,
+distributions, features and hyper-parameters are data, not code),
+single-seed reproducibility, and an auditable ground-truth scorecard.
+
+\subsection{Limitations}
+The data is synthetic and encodes hand-tuned assumptions; it is not validated
+against a real loan book, and the distributions are designed rather than fitted
+to survey data. Sensitive-adjacent attributes (gender, province) are present for
+realism but no fairness audit has been performed; consequently the models must
+not be used for real lending decisions.
+
+\subsection{Future work}
+Promising extensions include calibrating distributions against published
+Cambodian micro-finance statistics, adding probability-calibrated outputs and
+tunable decision thresholds for the approval model, a fairness analysis across
+gender and region, gradient-boosting and logistic baselines for comparison, and
+unit tests for the scorecard and samplers.
+
+%------------------------------------------------------------------------------
+\section{Conclusion}
+
+A carefully designed synthetic dataset can support a credible, end-to-end
+credit-modelling workflow without any real customer data. By grounding Version~2
+in the Cambodian micro-lending market and keeping the labelling logic
+transparent, the pipeline produces models whose strengths (a highly learnable
+risk grade) and limits (an intentionally noisy approval task) are both
+explainable. The result is a reproducible, production-shaped codebase suitable
+for demonstration, teaching, and integration into a web application.
+
+%------------------------------------------------------------------------------
+\section*{Reproducibility}
+The full pipeline is reproduced with:
+\begin{lstlisting}
+pip install -r requirements.txt
+python -m data_generation.run
+python -m model_training.train
+python -m model_training.predict
+# or simply:  make all
+\end{lstlisting}
+
+\begin{thebibliography}{1}
+\bibitem{mitchell2019}
+M.~Mitchell \emph{et al.}, ``Model cards for model reporting,''
+in \emph{Proc. Conf. Fairness, Accountability, and Transparency}, 2019,
+pp.~220--229.
+\bibitem{sklearn}
+F.~Pedregosa \emph{et al.}, ``Scikit-learn: Machine learning in Python,''
+\emph{J. Mach. Learn. Res.}, vol.~12, pp.~2825--2830, 2011.
+\end{thebibliography}
+
+\end{document}

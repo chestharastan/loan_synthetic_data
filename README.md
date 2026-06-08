@@ -1,65 +1,171 @@
-# Project Summary
+# Cambodian Loan Risk & Approval — Synthetic Data & ML Pipeline
 
-## Synthetic Data Versions
-Our project involves two versions of synthetic data for predicting **Risk Level** and **Loan Approval**.
+An end-to-end, reproducible machine-learning project that **(1) generates a
+realistic synthetic loan-application dataset for the Cambodian micro-lending
+market and (2) trains two models** on it:
 
-### **Version 1: Large Feature Set**
-- Contains **33 feature columns** plus **2 target columns** (Risk Level and Risk Score).
-- Provides a detailed feature set but may be overly complex for real-world deployment.
+| Model | Task | Target | Type |
+|-------|------|--------|------|
+| **Risk** | Credit-risk grading | `RiskCategory` ∈ {Low, Medium, High} | Multiclass classification |
+| **Approval** | Underwriting decision | `LoanStatus` ∈ {Approved, Rejected} | Binary classification |
 
-### **Version 2: Reduced Feature Set**
-- Contains **15 feature columns** plus **2 target columns** (Risk Level and Risk Score).
-- Optimized for efficiency and reduced complexity while maintaining prediction performance.
+The data generation and the model training live in **separate, independent
+packages** so each layer can evolve on its own. Everything is driven by a
+single [`config.yaml`](config.yaml) and is reproducible from one random seed.
 
----
-
-## **Model Performance Comparison**
-
-### **Version 1: Loan Approval Prediction**
-
-#### Logistic Regression
-- **Accuracy:** 91.45%
-- **Precision, Recall, and F1-score:**
-  - Approved (1): Precision **0.99**, Recall **0.78**, F1-score **0.87**
-  - Rejected (0): Precision **0.88**, Recall **0.99**, F1-score **0.94**
-
-#### Random Forest Classifier
-- **Accuracy:** 91.00%
-- Similar performance to Logistic Regression.
-
-#### Gradient Boosting Regressor
-- **Mean Squared Error (MSE):** 19.27
-- **R² Score:** 0.76
+> The trained pipelines are saved as `joblib` artifacts ready to be served from
+> a backend such as the companion Django app
+> [Loan-Advisor](https://github.com/salarymakage/Loan-Advisor).
 
 ---
 
-### **Version 2: Risk & Loan Approval Prediction**
+## Architecture
 
-#### **Risk Level Prediction (Confusion Matrix & Report)**
-- **Confusion Matrix:**
-  - Low Risk: **86% Precision**, **76% Recall**, **81% F1-score**
-  - Medium Risk: **92% Precision**, **93% Recall**, **93% F1-score**
-  - High Risk: **85% Precision**, **85% Recall**, **85% F1-score**
-- **Overall Accuracy:** 89%
+```
+config.yaml ──────────────┐  (single source of truth)
+                          ▼
+ ┌─────────────────────────────┐        ┌──────────────────────────────┐
+ │     data_generation/        │  CSV   │      model_training/         │
+ │  distributions → risk_engine│ ─────► │ preprocessing → trainer       │
+ │        → generator → run    │        │   → evaluate → predict        │
+ └─────────────────────────────┘        └──────────────────────────────┘
+            │                                        │
+            ▼                                        ▼
+     data/loan_applications.csv          models/*.joblib + artifacts/metrics.json
+```
 
-#### **Loan Approval Prediction (Confusion Matrix & Report)**
-- **Confusion Matrix:**
-  - Approved: **76% Precision**, **77% Recall**, **76% F1-score**
-  - Rejected: **76% Precision**, **75% Recall**, **75% F1-score**
-- **Overall Accuracy:** 76%
-
----
-
-## **Implementation in Django**
-When implementing this model with Django, the focus will be on integrating the machine learning models into the fullstack. The setup process will not be emphasized, as the priority is on:
-- Using **Django** for user inference easy for looking and input.
-- User input the **data** in the form of the website the model is going to predict.
-- **Serializing model predictions** into JSON responses.
+The two packages communicate **only through the CSV contract** documented in
+[`docs/DATA_DICTIONARY.md`](docs/DATA_DICTIONARY.md). The trainer knows nothing
+about how the data was produced; the generator knows nothing about the models.
 
 ---
 
+## Project layout
 
-## **Conclusion**
-- **Version 1** provides high accuracy but requires more computational resources.
-- **Version 2** simplifies the model while maintaining strong predictive power.
-- **Django** Create the interface for user to input https://github.com/salarymakage/Loan-Advisor.git
+```
+loan_synthetic_data/
+├── config.yaml                 # all tunable parameters live here
+├── requirements.txt
+├── Makefile                    # `make data`, `make train`, `make all`
+│
+├── common/                     # shared config loader
+│   └── config.py
+│
+├── data_generation/            # ── FOLDER 1: produce the dataset ──
+│   ├── distributions.py        #   domain sampling primitives
+│   ├── risk_engine.py          #   deterministic risk scorecard + approval rule
+│   ├── generator.py            #   assembles records → DataFrame → CSV
+│   └── run.py                  #   CLI entry point
+│
+├── model_training/             # ── FOLDER 2: train & serve the models ──
+│   ├── preprocessing.py        #   shared scaling + one-hot encoding
+│   ├── trainer.py              #   fit, evaluate, persist both models
+│   ├── evaluate.py             #   metrics helpers
+│   ├── predict.py              #   load pipelines & score new applications
+│   └── train.py                #   CLI entry point
+│
+├── data/                       # generated CSVs (git-ignored)
+├── models/                     # saved .joblib pipelines (git-ignored)
+├── artifacts/                  # metrics.json and plots (git-ignored)
+├── docs/                       # data dictionary, methodology, model card
+└── notebooks/                  # original exploratory notebooks (legacy)
+```
+
+---
+
+## Quickstart
+
+```bash
+# 1. Install dependencies
+pip install -r requirements.txt           # or: make install
+
+# 2. Generate the synthetic dataset → data/loan_applications.csv
+python -m data_generation.run             # or: make data
+
+# 3. Train both models → models/*.joblib + artifacts/metrics.json
+python -m model_training.train            # or: make train
+
+# 4. Score a sample application
+python -m model_training.predict
+```
+
+Run the whole pipeline in one shot:
+
+```bash
+make all
+```
+
+### Useful overrides
+
+```bash
+python -m data_generation.run --n 5000 --out data/sample.csv
+python -m model_training.train --data data/sample.csv
+```
+
+---
+
+## Using the trained models
+
+```python
+from common import load_config
+from model_training import LoanScorer
+
+scorer = LoanScorer(load_config())
+
+application = {
+    "Province": "Kandal", "RegionType": "Semi-Urban", "Age": 43,
+    "Gender": "Female", "EmploymentType": "Salaried", "AnnualIncomeUSD": 9000,
+    "CreditHistory": "Good", "ExistingDebtUSD": 0, "SavingsAssetsUSD": 6550,
+    "LoanType": "House", "LoanAmountUSD": 10775, "LoanTermYears": 10,
+    "AnnualInterestRatePct": 14.23, "CollateralUSD": 12000, "DTI": 0.18,
+}
+
+print(scorer.score(application))
+# {'risk_category': 'Low Risk', 'loan_status': 'Approved'}
+```
+
+---
+
+## Results (40,000 synthetic applications, hold-out test set)
+
+| Model | Accuracy | Macro F1 |
+|-------|:--------:|:--------:|
+| Risk (3-class) | ~0.90 | ~0.86 |
+| Approval (binary) | ~0.78 | ~0.76 |
+
+The risk model is highly learnable because its label is a transparent
+scorecard. The approval model is intentionally harder — approval is a
+*probabilistic* decision with deliberate noise, which is realistic and prevents
+the model from trivially memorising the rule. Full metrics are written to
+`artifacts/metrics.json` after each training run.
+
+See [`docs/MODEL_CARD.md`](docs/MODEL_CARD.md) for intended use and limitations,
+and [`docs/METHODOLOGY.md`](docs/METHODOLOGY.md) for how the data is generated
+and labelled.
+
+---
+
+## Design highlights
+
+- **Separation of concerns** — generation and training are decoupled packages
+  that share nothing but a documented CSV schema.
+- **Config-driven & reproducible** — one `config.yaml`, one seed; re-running
+  reproduces the dataset and models bit-for-bit.
+- **Transparent labels** — risk is a documented points-based scorecard
+  (`risk_engine.py`), so the "ground truth" is auditable, not a black box.
+- **Production-shaped** — `sklearn` `Pipeline`s bundle preprocessing with the
+  model, so the saved `.joblib` consumes raw application dicts directly with no
+  feature-engineering drift between training and serving.
+- **Tested end-to-end** — `make all` runs generation → training → scoring.
+
+---
+
+## Legacy notebooks
+
+The original exploratory notebooks are preserved under `notebooks/` for
+reference:
+
+- `Version1_legacy.ipynb` — early US-style dataset (33 features).
+- `Version2_legacy.ipynb` — Cambodian dataset that this package productionises.
+
+They are **not** part of the supported pipeline; use the packages above.

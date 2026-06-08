@@ -1,0 +1,98 @@
+# =============================================================================
+# Central configuration for the Loan Risk & Approval pipeline.
+#
+# Everything that the data generator and the model trainer need is declared
+# here so that experiments are reproducible and tunable without touching code.
+# Both `data_generation` and `model_training` read this single file.
+# =============================================================================
+
+project:
+  name: "cambodian-loan-risk"
+  random_seed: 42
+
+# ----------------------------------------------------------------------------
+# Synthetic data generation
+# ----------------------------------------------------------------------------
+generation:
+  n_samples: 40000
+  output_path: "data/loan_applications.csv"
+
+  # Province distribution (probabilities must sum to 1.0).
+  provinces:
+    "Phnom Penh": 0.45
+    "Kandal": 0.08
+    "Siem Reap": 0.07
+    "Svay Rieng": 0.04
+    "Kampong Speu": 0.04
+    "Kampong Thom": 0.03
+    "Battambang": 0.04
+    "Others": 0.25
+
+  # Maps each province to a region type used throughout the risk model.
+  region_map:
+    "Phnom Penh": "Urban"
+    "Kandal": "Semi-Urban"
+    "Siem Reap": "Semi-Urban"
+    "Battambang": "Semi-Urban"
+    "Svay Rieng": "Rural"
+    "Kampong Speu": "Rural"
+    "Kampong Thom": "Rural"
+    "Others": "Rural"
+
+  age_range: [18, 65]
+  gender_probs:        # Male / Female
+    Male: 0.47
+    Female: 0.53
+
+  credit_history_probs:
+    Good: 0.45
+    Fair: 0.35
+    Poor: 0.15
+    "No History": 0.05
+
+# ----------------------------------------------------------------------------
+# Model training
+# ----------------------------------------------------------------------------
+training:
+  input_path: "data/loan_applications.csv"
+  model_dir: "models"
+  metrics_dir: "artifacts"
+  test_size: 0.20
+
+  # Two independent supervised targets share the same feature set.
+  targets:
+    risk:
+      column: "RiskCategory"
+      type: "multiclass"
+      labels: ["Low Risk", "Medium Risk", "High Risk"]
+    approval:
+      column: "LoanStatus"
+      type: "binary"
+      positive_label: "Approved"
+
+  features:
+    numeric:
+      - "Age"
+      - "AnnualIncomeUSD"
+      - "ExistingDebtUSD"
+      - "SavingsAssetsUSD"
+      - "LoanAmountUSD"
+      - "LoanTermYears"
+      - "AnnualInterestRatePct"
+      - "CollateralUSD"
+      - "DTI"
+    categorical:
+      - "Province"
+      - "RegionType"
+      - "Gender"
+      - "EmploymentType"
+      - "CreditHistory"
+      - "LoanType"
+
+  # RandomForest hyper-parameters (shared by both models).
+  model:
+    n_estimators: 200
+    max_depth: 12
+    min_samples_leaf: 5
+    class_weight: "balanced"
+    n_jobs: -1

@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Generated artifacts (reproducible from code + config)
+data/*.csv
+models/*.joblib
+artifacts/*.json
+artifacts/*.png
+
+# Keep the folders themselves tracked
+!data/.gitkeep
+!models/.gitkeep
+!artifacts/.gitkeep
+
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
